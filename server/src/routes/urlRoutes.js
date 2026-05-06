@@ -1,8 +1,9 @@
 const express = require("express");
 const router = express.Router();
+const limiter = require("../middleware/rateLimiter");
 const { createUrl, redirectUrl } = require("../controllers/urlController");
 
-router.post("/", createUrl);
+router.post("/", limiter, createUrl);
 router.get("/:code", redirectUrl);
 
 module.exports = router;

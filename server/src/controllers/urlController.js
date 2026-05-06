@@ -1,6 +1,8 @@
 const generateCode = require("../utils/generateCode");
 const Url = require("../models/Url");
-const base_url = `http://localhost:5000`;
+const validator = require("validator");
+const BASE_URL = process.env.BASE_URL;
+const redisClient = require("../config/redis");
 
 const createUrl = async (req, res) => {
   try {
@@ -10,9 +12,21 @@ const createUrl = async (req, res) => {
         .status(400)
         .json({ success: false, message: "Url is required" });
     }
+    if (!validator.isURL(originalUrl)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Not a valid URL" });
+    }
+
+    const existing = await Url.findOne({ originalUrl });
+    if (existing) {
+      return res.json({ shortUrl: `${BASE_URL}/${existing.shortCode}` });
+    }
     const shortCode = generateCode();
     const newUrl = await Url.create({ originalUrl, shortCode });
-    res.json({ shortUrl: `${base_url}/${shortCode}` });
+
+    await redisClient.set(`urlshortener:${code}`, originalUrl, "EX", 3600);
+    res.json({ shortUrl: `${BASE_URL}/${shortCode}` });
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -25,14 +39,36 @@ const createUrl = async (req, res) => {
 const redirectUrl = async (req, res) => {
   try {
     const { code } = req.params;
-    const url = await Url.findOne({ shortCode: code });
+    let originalUrl = await redisClient.get(`urlshortener:${code}`);
+
+    // CACHE HIT
+    if (originalUrl) {
+      // increment clicks in redis
+      await redisClient.incr(`urlshortener:clicks:${code}`);
+
+      return res.redirect(originalUrl);
+    }
+    // CACHE MISS -> CHECK DATABASE
+    const url = await Url.findOne({
+      shortCode: code,
+    });
+
     if (!url) {
-      return res.status(404).json({ success: false, message: "Url not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Url not found",
+      });
     }
 
-    url.clicks++;
-    await url.save();
-    res.redirect(url.originalUrl);
+    originalUrl = url.originalUrl;
+
+    // STORE IN REDIS
+    await redisClient.set(`urlshortener:${code}`, originalUrl, "EX", 3600);
+
+    // CLICK COUNTER
+    await redisClient.incr(`urlshortener:clicks:${code}`);
+
+    return res.redirect(originalUrl);
   } catch (error) {
     return res.status(500).json({
       success: false,
