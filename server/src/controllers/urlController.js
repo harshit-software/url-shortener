@@ -3,6 +3,7 @@ const Url = require("../models/Url");
 const validator = require("validator");
 const BASE_URL = process.env.BASE_URL;
 const redisClient = require("../config/redis");
+const generateQrCode = require("../utils/generateQRCodes");
 
 const createUrl = async (req, res) => {
   try {
@@ -23,9 +24,10 @@ const createUrl = async (req, res) => {
       return res.json({ shortUrl: `${BASE_URL}/${existing.shortCode}` });
     }
     const shortCode = generateCode();
-    const newUrl = await Url.create({ originalUrl, shortCode });
+    const qrCode = await generateQrCode(`${BASE_URL}/${shortCode}`);
+    const newUrl = await Url.create({ originalUrl, shortCode, qrCode });
 
-    await redisClient.set(`urlshortener:${code}`, originalUrl, "EX", 3600);
+    await redisClient.set(`urlshortener:${shortCode}`, originalUrl, "EX", 3600);
     res.json({ shortUrl: `${BASE_URL}/${shortCode}` });
   } catch (error) {
     return res.status(500).json({
